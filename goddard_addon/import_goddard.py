@@ -7,6 +7,7 @@ import re
 import math
 from mathutils import Matrix, Vector, Euler
 from .dynlist_utils import tokenize_list
+from .dynlist_lookup import DynObjLUT
 
 D_MATERIAL = bpy.types.Material
 D_LIGHT = bpy.types.Light
@@ -105,15 +106,15 @@ def load_dynlist(filepath, vertex_data, face_data):
         
         # Apply vertices
         mesh = bpy.data.meshes.new(name='Mario Head Mesh')
-        mesh.vertices.add(len(vertex_list) / 3)
+        mesh.vertices.add(len(vertex_list) // 3)
         mesh.vertices.foreach_set("co", vertex_list)
         
         # Apply Triangles
         mesh.loops.add(len(face_list))
         mesh.loops.foreach_set("vertex_index", face_list)
-        mesh.polygons.add(len(face_list) / 3)
+        mesh.polygons.add(len(face_list) // 3)
         mesh.polygons.foreach_set("loop_start", range(0, len(face_list), 3))
-        mesh.polygons.foreach_set("loop_total", [3] * math.floor(len(face_list) / 3))
+        mesh.polygons.foreach_set("loop_total", [3] * (len(face_list) // 3))
         mesh.polygons.foreach_set("material_index", mat_id_list)
         
         mesh.update()
@@ -129,7 +130,12 @@ def load_dynlist(filepath, vertex_data, face_data):
         if arr_start3 != -1:
             arr_end3 = text.find("EndGroup", arr_start3) - 1
             dynlist = text[arr_start3:arr_end3].replace(",\n", "\n").replace(" ", "")
-            exec(dynlist)
+
+            tmp1 = dynlist.split("\n")
+            tmp2 = [i for i in tmp1 if "//" not in i[0:2]]
+            tmp3 = [i.split("//")[0] for i in tmp2]
+            new_dynlist = "\n".join(tmp3)
+            exec(new_dynlist)
         
         # Add Object to the scene
         current_context.collection.objects.link(obj)
@@ -157,20 +163,37 @@ def load_data_from_master_list(filepath, objects):
         bone_armature_map = {}
 
         obj_id_map = {
-            "face": 0xE1, "eyebrow.L": 0x3B,
-            "eyebrow.R": 0x5D, "mustache": 0x19
+            "face": "DYNOBJ_MARIO_FACE_SHAPE",
+            "eyebrow.L": "DYNOBJ_MARIO_LEFT_EYEBROW_SHAPE",
+            "eyebrow.R": "DYNOBJ_MARIO_RIGHT_EYEBROW_SHAPE",
+            "mustache": "DYNOBJ_MARIO_MUSTACHE_SHAPE",
+            # these are dynamically set by the game
+            # "eye.L": "DYNOBJ_MARIO_LEFT_EYE_SHAPE",
+            # "eye.R": "DYNOBJ_MARIO_RIGHT_EYE_SHAPE",
         }
         bone_id_map = {
-            0xD7: "eye.L", 0xCE: "eye.R",
-            0xC5: "face?", 0xC2: "jaw",
-            0xB9: "nose", 0xB0: "ear.L",
-            0xA7: "ear.R", 0x9E: "cheek.L",
-            0x95: "cheek.R", 0x8C: "upper_lip",
-            0x83: "forehead", 0x6A: "root?",
-            0x0F: "mustache.L", 0x06: "mustache.R",
-            0x53: "eyebrow.L.L", 0x4A: "eyebrow.R.L",
-            0x41: "eyebrow.L", 0x31: "eyebrow.R.R",
-            0x28: "eyebrow.L.R", 0x1F: "eyebrow.R"
+            "DYNOBJ_RIGHT_EYELID_JOINT_1": "eyelid.L",
+            "DYNOBJ_LEFT_EYELID_JOINT_1": "eyelid.R",
+            "DYNOBJ_MARIO_RIGHT_JAW_JOINT": "jaw.R",
+            "DYNOBJ_MARIO_LEFT_JAW_JOINT": "jaw.L",
+            "DYNOBJ_MARIO_NOSE_JOINT_1": "nose.1",
+            "DYNOBJ_MARIO_NOSE_JOINT_2": "nose.2",
+            "DYNOBJ_MARIO_RIGHT_EAR_JOINT_1": "ear.R",
+            "DYNOBJ_MARIO_LEFT_EAR_JOINT_1": "ear.L",
+            "DYNOBJ_MARIO_RIGHT_LIP_CORNER_JOINT_1": "cheek.R",
+            "DYNOBJ_MARIO_LEFT_LIP_CORNER_JOINT_1": "cheek.L",
+            "DYNOBJ_MARIO_UNKNOWN_140": "upper_lip",
+            "DYNOBJ_MARIO_CAP_JOINT_1": "forehead",
+            "DYNOBJ_MARIO_LEFT_EYE_JOINT_1": "eye.L",
+            "DYNOBJ_MARIO_RIGHT_EYE_JOINT_1": "eye.R",
+            "DYNOBJ_MARIO_LEFT_MUSTACHE_JOINT_1": "mustache.L",
+            "DYNOBJ_MARIO_RIGHT_MUSTACHE_JOINT_1": "mustache.R",
+            "DYNOBJ_MARIO_RIGHT_EYEBROW_RPART_JOINT_1": "eyebrow.L.L",
+            "DYNOBJ_MARIO_RIGHT_EYEBROW_LPART_JOINT_1": "eyebrow.R.L",
+            "DYNOBJ_MARIO_RIGHT_EYEBROW_MPART_JOINT_1": "eyebrow.L",
+            "DYNOBJ_MARIO_LEFT_EYEBROW_LPART_JOINT_1": "eyebrow.R.R",
+            "DYNOBJ_MARIO_LEFT_EYEBROW_RPART_JOINT_1": "eyebrow.L.R",
+            "DYNOBJ_MARIO_LEFT_EYEBROW_MPART_JOINT_1": "eyebrow.R",
         }
 
         def remove_empty_weights():
@@ -192,14 +215,41 @@ def load_data_from_master_list(filepath, objects):
             shape_obj.modifiers[-1].object = armature
 
         for command, params in dynlist:
-            if (command == "MakeDynObj" and "D_NET" in params) or (command == "MakeNetWithSubGroup"):
-                curr_object = bpy.data.objects.new(hex(params[1]), bpy.data.armatures.new("n64_net"))
+            if (command == "MakeDynObj" and "D_NET" in params):
+                print(command,params)
+                curr_object = bpy.data.objects.new(params[1], bpy.data.armatures.new("n64_net"))
                 current_context.collection.objects.link(curr_object)
                 select_object(curr_object)
                 curr_object.show_in_front = True
-                objects[hex(params[1])] = curr_object
+                # objects[hex(DynObjLUT[params[1]])] = curr_object
                 curr_armature = curr_object
                 objects[params[1]] = curr_object
+
+            elif command == "MakeAttachedJoint":
+                print(command,params)
+                curr_object = bpy.data.objects.new(params, bpy.data.armatures.new("n64_net"))
+                current_context.collection.objects.link(curr_object)
+                select_object(curr_object)
+                curr_object.show_in_front = True
+                # objects[hex(DynObjLUT[params[1]])] = curr_object
+                curr_armature = curr_object
+                objects[params] = curr_object
+
+            elif (command == "MakeNetWithSubGroup"):
+                print(command,params)
+                if type(params) is int:
+                    curr_object = bpy.data.objects.new(hex(params), bpy.data.armatures.new("n64_net"))
+                else:
+                    curr_object = bpy.data.objects.new(params, bpy.data.armatures.new("n64_net"))
+                current_context.collection.objects.link(curr_object)
+                select_object(curr_object)
+                curr_object.show_in_front = True
+                # objects[hex(DynObjLUT[params[1]])] = curr_object
+                curr_armature = curr_object
+                if type(params) is int:
+                    objects[hex(params)] = curr_object
+                else:
+                    objects[params] = curr_object
             
             elif command == "SetScale":
                 if isinstance(curr_object, bpy.types.Object):
@@ -229,7 +279,8 @@ def load_data_from_master_list(filepath, objects):
                 set_shape_pointer(curr_armature, objects[obj_name[0]])
             
             elif command == "AttachTo":
-                if params[1] == 1001:
+                print(command, params)
+                if params[1] == "DYNOBJ_MARIO_MAIN_ANIMATOR":
                     continue
 
                 bpy.ops.object.select_all(action='DESELECT')
@@ -259,9 +310,9 @@ def load_data_from_master_list(filepath, objects):
                     select_object(other_obj)
                     bpy.ops.object.parent_set()
     
-            elif command == "AttachNetToJoint":
+            elif command == "MakeAttachedJoint":
                 remove_empty_weights()
-                curr_weights = mesh_weights[curr_mesh].setdefault(params[1], [])
+                curr_weights = mesh_weights[curr_mesh].setdefault(params, [])
 
                 select_object(curr_armature)
                 bpy.ops.object.mode_set(mode='EDIT', toggle=False)
@@ -287,8 +338,8 @@ def load_data_from_master_list(filepath, objects):
         
         remove_empty_weights()
         
-        for obj, id in obj_id_map.items():
-            for name, weights in mesh_weights[id].items():
+        for obj, _id in obj_id_map.items():
+            for name, weights in mesh_weights[_id].items():
                 vert_group = objects[obj].vertex_groups.new(name=bone_id_map[name])
                 for index, weight in weights:
                     vert_group.add([index], weight, "REPLACE")
@@ -298,7 +349,7 @@ def execute(op, context):
     global current_context, vertex_count
 
     source_dir = bpy.path.abspath(context.scene.goddard.source_dir)
-    goddard_file_path = os.path.join(source_dir, "src\\goddard\\dynlists\\")
+    goddard_file_path = os.path.join(source_dir, "src/goddard/dynlists")
     bpy.ops.object.select_all(action='DESELECT')
     current_context = context
     vertex_count = 0
@@ -310,33 +361,33 @@ def execute(op, context):
     mario_objects = {
         "face": load_dynlist(
             os.path.join(goddard_file_path, "dynlist_mario_face.c"),
-            "mario_Face_VtxData[VTX_NUM][3]",
-            "mario_Face_FaceData[FACE_NUM][4]"
+            "mario_Face_VtxData[][3]",
+            "mario_Face_FaceData[][4]"
         ),
         "eyebrow.L": load_dynlist(
             os.path.join(goddard_file_path, "dynlists_mario_eyebrows_mustache.c"),
-            "verts_mario_eyebrow_left[VTX_NUM][3]",
-            "facedata_mario_eyebrow_left[FACE_NUM][4]"
+            "verts_mario_eyebrow_left[][3]",
+            "facedata_mario_eyebrow_left[][4]"
         ),
         "eyebrow.R": load_dynlist(
             os.path.join(goddard_file_path, "dynlists_mario_eyebrows_mustache.c"),
-            "verts_mario_eyebrow_right[VTX_NUM][3]",
-            "facedata_mario_eyebrow_right[FACE_NUM][4]"
+            "verts_mario_eyebrow_right[][3]",
+            "facedata_mario_eyebrow_right[][4]"
         ),
         "mustache": load_dynlist(
             os.path.join(goddard_file_path, "dynlists_mario_eyebrows_mustache.c"),
-            "verts_mario_mustache[VTX_NUM][3]",
-            "facedata_mario_mustache[FACE_NUM][4]"
+            "verts_mario_mustache[][3]",
+            "facedata_mario_mustache[][4]"
         ),
         "eye.L": load_dynlist(
             os.path.join(goddard_file_path, "dynlists_mario_eyes.c"),
-            "verts_mario_eye_left[VTX_NUM][3]",
-            "facedata_mario_eye_left[FACE_NUM][4]"
+            "verts_mario_eye_left[][3]",
+            "facedata_mario_eye_left[][4]"
         ),
         "eye.R": load_dynlist(
             os.path.join(goddard_file_path, "dynlists_mario_eyes.c"),
-            "verts_mario_eye_right[VTX_NUM][3]",
-            "facedata_mario_eye_right[FACE_NUM][4]"
+            "verts_mario_eye_right[][3]",
+            "facedata_mario_eye_right[][4]"
         )
     }
 
