@@ -5,6 +5,7 @@ import os
 import sys
 import re
 import math
+import time
 from mathutils import Matrix, Vector, Euler
 from .dynlist_utils import tokenize_list
 from .dynlist_lookup import DynObjLUT
@@ -51,8 +52,9 @@ def SetId(id):
 def SetShapePtrPtr(null_arg):
     pass
 
+# only used for eyes
 def SetAmbient(r, g, b):
-    pass #print(["SetAmbient", r, g, b])
+    pass
 
 def SetDiffuse(r, g, b):
     if current_mat:
@@ -197,10 +199,11 @@ def load_data_from_master_list(filepath, objects):
         }
 
         def remove_empty_weights():
-            nonlocal curr_bone_idx
-            if len(curr_weights) == 0 and curr_bone_idx != 0:
-                mesh_weights[curr_mesh].pop(curr_bone_idx)
-                curr_bone_idx = 0
+            pass
+            # nonlocal curr_bone_idx
+            # if len(curr_weights) == 0 and curr_bone_idx != 0:
+            #     mesh_weights[curr_mesh].pop(curr_bone_idx)
+            #     curr_bone_idx = 0
         
         def set_shape_pointer(armature, shape_obj):
             for mod in shape_obj.modifiers:
@@ -215,8 +218,8 @@ def load_data_from_master_list(filepath, objects):
             shape_obj.modifiers[-1].object = armature
 
         for command, params in dynlist:
+            print(command,params)
             if (command == "MakeDynObj" and "D_NET" in params):
-                print(command,params)
                 curr_object = bpy.data.objects.new(params[1], bpy.data.armatures.new("n64_net"))
                 current_context.collection.objects.link(curr_object)
                 select_object(curr_object)
@@ -225,18 +228,7 @@ def load_data_from_master_list(filepath, objects):
                 curr_armature = curr_object
                 objects[params[1]] = curr_object
 
-            elif command == "MakeAttachedJoint":
-                print(command,params)
-                curr_object = bpy.data.objects.new(params, bpy.data.armatures.new("n64_net"))
-                current_context.collection.objects.link(curr_object)
-                select_object(curr_object)
-                curr_object.show_in_front = True
-                # objects[hex(DynObjLUT[params[1]])] = curr_object
-                curr_armature = curr_object
-                objects[params] = curr_object
-
             elif (command == "MakeNetWithSubGroup"):
-                print(command,params)
                 if type(params) is int:
                     curr_object = bpy.data.objects.new(hex(params), bpy.data.armatures.new("n64_net"))
                 else:
@@ -266,11 +258,19 @@ def load_data_from_master_list(filepath, objects):
                 if isinstance(curr_object, bpy.types.Object):
                     curr_object.rotation_euler = params
                 elif isinstance(curr_object, bpy.types.EditBone):
+                    print("Step 0",curr_object)
+                    print("Step 1",curr_object.matrix)
+                    print("Step 2",[math.radians(rot) for rot in params])
+                    print("Step 3",Euler([math.radians(rot) for rot in params]))
+                    print("Step 4",Euler([math.radians(rot) for rot in params]).to_matrix())
+                    print("Step 5",Euler([math.radians(rot) for rot in params]).to_matrix().to_4x4())
+                    print("Step FINAL",Euler([math.radians(rot) for rot in params]).to_matrix().to_4x4())
                     curr_object.matrix = Euler([math.radians(rot) for rot in params]).to_matrix().to_4x4() @ curr_object.matrix
             
             elif command == "SetSkinShape":
-                remove_empty_weights()
-                mesh_weights.setdefault(params, {})
+                # remove_empty_weights()
+                # mesh_weights.setdefault(params, {})
+
                 curr_mesh = params
 
                 obj_name = [k for k, v in obj_id_map.items() if v == params]
@@ -279,7 +279,6 @@ def load_data_from_master_list(filepath, objects):
                 set_shape_pointer(curr_armature, objects[obj_name[0]])
             
             elif command == "AttachTo":
-                print(command, params)
                 if params[1] == "DYNOBJ_MARIO_MAIN_ANIMATOR":
                     continue
 
@@ -311,38 +310,41 @@ def load_data_from_master_list(filepath, objects):
                     bpy.ops.object.parent_set()
     
             elif command == "MakeAttachedJoint":
-                remove_empty_weights()
-                curr_weights = mesh_weights[curr_mesh].setdefault(params, [])
+                # remove_empty_weights()
+                # curr_weights = mesh_weights[curr_mesh].setdefault(params, [])
 
                 select_object(curr_armature)
                 bpy.ops.object.mode_set(mode='EDIT', toggle=False)
-                curr_bone_idx = params[1]
+                curr_bone_idx = DynObjLUT[params]
                 curr_bone = curr_armature.data.edit_bones.new("bone")
-                curr_bone.name = hex(params[1])
+
+                if params in bone_id_map.keys():
+                    curr_bone.name = bone_id_map[params]
+                else:
+                    curr_bone.name = params
+
+                # curr_bone.name = "TESTBONE"+str(hash(time.time()))
+
                 curr_bone.head = (0.0, 0.0, 0.0)
                 curr_bone.tail = (0.0, 0.5, 0.0)
                 curr_bone.matrix = Matrix.Identity(4)
                 bpy.ops.object.mode_set(mode='OBJECT')
-                curr_object = curr_bone
 
-                if params[1] in bone_id_map.keys():
-                    curr_bone.name = bone_id_map[params[1]]
 
-                print("Attach Net %s to Joint %s" % (curr_armature, curr_object))
+                print("Attach Net %s to Joint %s" % (curr_armature.name, curr_bone.name))
 
-                objects[params[1]] = curr_bone
+                objects[params] = curr_bone
                 bone_armature_map[curr_bone] = curr_armature
-            
             elif command == "SetSkinWeight":
                 curr_weights.append((params[0], params[1] / 100.0))
         
-        remove_empty_weights()
         
-        for obj, _id in obj_id_map.items():
-            for name, weights in mesh_weights[_id].items():
-                vert_group = objects[obj].vertex_groups.new(name=bone_id_map[name])
-                for index, weight in weights:
-                    vert_group.add([index], weight, "REPLACE")
+        # remove_empty_weights()
+        # for obj, _id in obj_id_map.items():
+        #     for name, weights in mesh_weights[_id].items():
+        #         vert_group = objects[obj].vertex_groups.new(name=bone_id_map[name])
+        #         for index, weight in weights:
+        #             vert_group.add([index], weight, "REPLACE")
 
 
 def execute(op, context):
